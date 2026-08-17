@@ -1,0 +1,29 @@
+{
+  "$schema": "./schema/pool-edge.config.schema.json",
+  "edgeName": "example-pool-edge",
+  "publicOrigin": "https://pool.army.example.com",
+  "pool": {
+    "baseUrl": "https://pool.example.com"
+  },
+  "cors": {
+    "allowedOrigins": ["https://army.example.com"]
+  },
+  "tokens": {
+    "prefix": "army_"
+  },
+  "tiers": {
+    "contributor": { "weightedTokens": 25000000, "models": null },
+    "proven": { "weightedTokens": 150000000, "models": null },
+    "probation": {
+      "weightedTokens": 2000000,
+      "models": ["claude-fable-5", "claude-sonnet-4-6"]
+    }
+  },
+  "support": {
+    "grantIncreaseNote": "Merged work earns an increase: ask the pool operator."
+  },
+  "passthroughAssets": [],
+  "kv": {
+    "namespaceId": ""
+  }
+}

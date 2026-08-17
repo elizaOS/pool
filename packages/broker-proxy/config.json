@@ -1,0 +1,26 @@
+{
+  "port": 18801,
+  "credentialsPath": "/path/to/oauth/.credentials.json",
+  "replacements": [
+    [
+      "internal_tool_name",
+      "ProviderFacingName"
+    ],
+    [
+      "another_internal_tool",
+      "AnotherProviderName"
+    ]
+  ],
+  "reverseMap": [
+    [
+      "internal_tool_name",
+      "ProviderFacingName"
+    ],
+    [
+      "another_internal_tool",
+      "AnotherProviderName"
+    ]
+  ],
+  "sanitizeBlocks": false,
+  "elizaAccountBrokerStrategy": "least-used"
+}

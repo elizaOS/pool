@@ -1,0 +1,17 @@
+node_modules/
+.env
+.env.*
+*.key
+*.pem
+*.bak-*
+*.bak
+.credentials.json
+credentials*.json
+secrets/
+logs/
+*.log
+usage-*.jsonl
+*.jsonl
+traces/
+.wrangler/
+.DS_Store

@@ -1,0 +1,16 @@
+{
+  "name": "army-pool-edge",
+  "private": true,
+  "type": "module",
+  "version": "0.1.0",
+  "description": "Deployable compute-pool edge template: run this in front of a pool-meter instance to contribute metered inference to an army instance.",
+  "scripts": {
+    "render": "node scripts/render.mjs",
+    "test": "node --test 'test/**/*.test.js' 'test/**/*.test.mjs'",
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy"
+  },
+  "devDependencies": {
+    "wrangler": "^4.0.0"
+  }
+}

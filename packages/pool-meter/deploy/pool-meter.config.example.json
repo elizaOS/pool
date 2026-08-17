@@ -1,0 +1,11 @@
+{
+  "brokerToken": "<broker-api-token-goes-here>",
+  "brokerHost": "127.0.0.1",
+  "brokerPort": 7803,
+  "upstreamHost": "127.0.0.1",
+  "upstreamPort": 18807,
+  "listenHost": "127.0.0.1",
+  "listenPort": 18811,
+  "defaultQuota": 13371337,
+  "publicBaseUrl": "https://pool.example.com"
+}

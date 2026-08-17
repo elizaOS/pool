@@ -1,0 +1,54 @@
+# ---------------------------------------------------------------------------
+# SECRETS — never commit. The real files live outside this tree entirely, in
+# /opt/pool/secrets. These patterns are a second line of defense in
+# case one is ever copied in by accident.
+# ---------------------------------------------------------------------------
+pool-keys.json
+pool-invites.json
+pool-meter.config.json
+pool-byo-creds.json
+pool-byo-master.key
+traces/
+*.secret
+*.secret.*
+secrets/
+.env
+.env.*
+*.pem
+*.key
+!src/lib/*.js
+id_rsa*
+*credential*
+*token*.json
+
+# ---------------------------------------------------------------------------
+# Runtime state / logs — machine-specific, often contains usage detail
+# ---------------------------------------------------------------------------
+logs/
+*.jsonl
+*.log
+totals.json
+metrics-v2.json
+reputation-state.json
+usage-*.json*
+*.lock
+*.tmp
+*.tmp-*
+
+# ---------------------------------------------------------------------------
+# Backups of the live service
+# ---------------------------------------------------------------------------
+*.bak
+*.bak-*
+*.orig
+
+# ---------------------------------------------------------------------------
+# Misc
+# ---------------------------------------------------------------------------
+node_modules/
+.DS_Store
+__pycache__/
+*.pyc
+*.png
+rollback-*/
+.rollback-*/
