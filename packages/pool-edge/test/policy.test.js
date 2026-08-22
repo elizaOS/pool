@@ -62,6 +62,7 @@ test('ledger.json is forbidden but a lookalike prefix is not silently blocked', 
 
 test('only the allowlisted routes resolve', () => {
   assert.ok(resolveRoute('POST', '/v1/messages'));
+  assert.ok(resolveRoute('POST', '/v1/chat/completions'));
   assert.ok(resolveRoute('GET', '/keys/status'));
   assert.ok(resolveRoute('GET', '/join'));
   assert.ok(resolveRoute('POST', '/join/start'));
