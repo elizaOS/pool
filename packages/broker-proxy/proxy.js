@@ -30,6 +30,11 @@ const path = require('path');
 const os = require('os');
 const crypto = require('crypto');
 const { StringDecoder } = require('string_decoder');
+const {
+  CLAUDE_CODE_VERSION,
+  applyClaudeCodeProtocol,
+  claudeCodeHeaders
+} = require('./claude-code-protocol');
 
 // ─── Defaults ───────────────────────────────────────────────────────────────
 const DEFAULT_PORT = 18801;
@@ -37,12 +42,8 @@ const UPSTREAM_HOST = 'api.anthropic.com';
 const DEFAULT_UPSTREAM_URL = `https://${UPSTREAM_HOST}`;
 const VERSION = '2.2.3';
 
-// Claude Code version to emulate (update when new CC versions are released)
-const CC_VERSION = '2.1.97';
-
-// Billing fingerprint constants (matches real CC utils/fingerprint.ts)
-const BILLING_HASH_SALT = '59cf53e54c78';
-const BILLING_HASH_INDICES = [4, 7, 20];
+// Claude Code version to emulate (update with claude-code-protocol.js).
+const CC_VERSION = CLAUDE_CODE_VERSION;
 
 // Persistent per-instance identifiers (generated once at startup)
 const DEVICE_ID = crypto.randomBytes(32).toString('hex');
@@ -77,60 +78,6 @@ const CC_TOOL_STUBS = [
   '{"name":"NotebookEdit","description":"Edit notebook cells","input_schema":{"type":"object","properties":{"notebook_path":{"type":"string"},"cell_index":{"type":"integer"}},"required":["notebook_path"]}}',
   '{"name":"TodoRead","description":"Read current task list","input_schema":{"type":"object","properties":{}}}'
 ];
-
-// ─── Billing Fingerprint ────────────────────────────────────────────────────
-// Computes a 3-character SHA256 fingerprint hash matching real CC's
-// computeFingerprint() in utils/fingerprint.ts:
-//   SHA256(salt + msg[4] + msg[7] + msg[20] + version)[:3]
-// Applied to the first user message text in the request body.
-
-function computeBillingFingerprint(firstUserText) {
-  const chars = BILLING_HASH_INDICES.map(i => firstUserText[i] || '0').join('');
-  const input = `${BILLING_HASH_SALT}${chars}${CC_VERSION}`;
-  return crypto.createHash('sha256').update(input).digest('hex').slice(0, 3);
-}
-
-// Extract first user message text from the raw body using string scanning.
-// Avoids JSON.parse to preserve raw body integrity.
-function extractFirstUserText(bodyStr) {
-  // Find first "role":"user" in messages array
-  const msgsIdx = bodyStr.indexOf('"messages":[');
-  if (msgsIdx === -1) return '';
-  const userIdx = bodyStr.indexOf('"role":"user"', msgsIdx);
-  if (userIdx === -1) return '';
-
-  // Look for "content" near this role
-  // Could be "content":"string" or "content":[{..."text":"..."}]
-  const contentIdx = bodyStr.indexOf('"content"', userIdx);
-  if (contentIdx === -1 || contentIdx > userIdx + 500) return '';
-
-  const afterContent = bodyStr[contentIdx + '"content"'.length + 1]; // skip the :
-  if (afterContent === '"') {
-    // Simple string content: "content":"text here"
-    const textStart = contentIdx + '"content":"'.length;
-    let end = textStart;
-    while (end < bodyStr.length) {
-      if (bodyStr[end] === '\\') { end += 2; continue; }
-      if (bodyStr[end] === '"') break;
-      end++;
-    }
-    // Decode basic JSON escapes for the fingerprint characters
-    return bodyStr.slice(textStart, end)
-      .replace(/\\n/g, '\n').replace(/\\t/g, '\t').replace(/\\"/g, '"').replace(/\\\\/g, '\\');
-  }
-  // Array content: find first text block
-  const textIdx = bodyStr.indexOf('"text":"', contentIdx);
-  if (textIdx === -1 || textIdx > contentIdx + 2000) return '';
-  const textStart = textIdx + '"text":"'.length;
-  let end = textStart;
-  while (end < bodyStr.length) {
-    if (bodyStr[end] === '\\') { end += 2; continue; }
-    if (bodyStr[end] === '"') break;
-    end++;
-  }
-  return bodyStr.slice(textStart, Math.min(end, textStart + 50))
-    .replace(/\\n/g, '\n').replace(/\\t/g, '\t').replace(/\\"/g, '"').replace(/\\\\/g, '\\');
-}
 
 // ─── Shape fingerprint diagnostic ───────────────────────────────────────────
 // Structural description of a SHAPED body, for diffing a failing request
@@ -208,13 +155,6 @@ function describeShapedBody(bodyStr) {
   return parts.join(' ');
 }
 
-function buildBillingBlock(bodyStr) {
-  const firstText = extractFirstUserText(bodyStr);
-  const fingerprint = computeBillingFingerprint(firstText);
-  const ccVersion = `${CC_VERSION}.${fingerprint}`;
-  return `{"type":"text","text":"x-anthropic-billing-header: cc_version=${ccVersion}; cc_entrypoint=cli; cch=00000;"}`;
-}
-
 // ─── Stainless SDK Headers ──────────────────────────────────────────────────
 // Real Claude Code sends these on every request via the Anthropic JS SDK.
 function getStainlessHeaders() {
@@ -222,9 +162,6 @@ function getStainlessHeaders() {
   const osName = p === 'darwin' ? 'macOS' : p === 'win32' ? 'Windows' : p === 'linux' ? 'Linux' : p;
   const arch = process.arch === 'x64' ? 'x64' : process.arch === 'arm64' ? 'arm64' : process.arch;
   return {
-    'user-agent': `claude-cli/${CC_VERSION} (external, cli)`,
-    'x-app': 'cli',
-    'x-claude-code-session-id': INSTANCE_SESSION_ID,
     'x-stainless-arch': arch,
     'x-stainless-lang': 'js',
     'x-stainless-os': osName,
@@ -1377,29 +1314,6 @@ function processBody(bodyStr, config) {
     m = injectMissingCCStubs(m);
   }
 
-  // Layer 1: Billing header injection (dynamic fingerprint per request)
-  const BILLING_BLOCK = buildBillingBlock(m);
-  const sysArrayIdx = m.indexOf('"system":[');
-  if (sysArrayIdx !== -1) {
-    const insertAt = sysArrayIdx + '"system":['.length;
-    m = m.slice(0, insertAt) + BILLING_BLOCK + ',' + m.slice(insertAt);
-  } else if (m.includes('"system":"')) {
-    const sysStart = m.indexOf('"system":"');
-    let i = sysStart + '"system":"'.length;
-    while (i < m.length) {
-      if (m[i] === '\\') { i += 2; continue; }
-      if (m[i] === '"') break;
-      i++;
-    }
-    const sysEnd = i + 1;
-    const originalSysStr = m.slice(sysStart + '"system":'.length, sysEnd);
-    m = m.slice(0, sysStart)
-      + '"system":[' + BILLING_BLOCK + ',{"type":"text","text":' + originalSysStr + '}]'
-      + m.slice(sysEnd);
-  } else {
-    m = '{"system":[' + BILLING_BLOCK + '],' + m.slice(1);
-  }
-
   // Metadata injection: device_id + session_id matching real CC format
   // Uses raw string manipulation to inject/replace metadata field.
   // Depth-aware: only a TOP-LEVEL metadata field is replaced. A `metadata`
@@ -1538,7 +1452,10 @@ function processBody(bodyStr, config) {
     }
   }
 
-  return m;
+  // Layer 1 runs last because cch covers the final serialized request shape.
+  // The transformer replaces any existing compatibility blocks, so retries and
+  // already-shaped clients cannot accumulate duplicate system instructions.
+  return applyClaudeCodeProtocol(m);
 }
 
 // ─── Response Processing ────────────────────────────────────────────────────
@@ -1694,7 +1611,7 @@ function buildUpstreamHeaders(req, bodyLength, accessToken, requestModelIsHaiku)
   headers['accept-encoding'] = 'identity';
   if (!headers['anthropic-version']) headers['anthropic-version'] = '2023-06-01';
 
-  const ccHeaders = getStainlessHeaders();
+  const ccHeaders = { ...getStainlessHeaders(), ...claudeCodeHeaders(INSTANCE_SESSION_ID) };
   for (const [k, v] of Object.entries(ccHeaders)) headers[k] = v;
 
   const existingBeta = headers['anthropic-beta'] || '';
