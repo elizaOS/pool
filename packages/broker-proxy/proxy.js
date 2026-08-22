@@ -35,6 +35,7 @@ const {
   applyClaudeCodeProtocol,
   claudeCodeHeaders
 } = require('./claude-code-protocol');
+const { anthropicToChat, chatToAnthropic, createSseTranslator, openAiError } = require('./openai-chat-compat');
 
 // ─── Defaults ───────────────────────────────────────────────────────────────
 const DEFAULT_PORT = 18801;
@@ -1660,6 +1661,7 @@ function sendUpstreamOnce(config, req, res, body, auth, reqNum, abortSignal, act
       return;
     }
     const lib = upstreamUrl.protocol === 'http:' ? http : https;
+    const isChat = req.method === 'POST' && req.url.split('?')[0] === '/v1/chat/completions';
     let requestModelIsHaiku = false;
     try { requestModelIsHaiku = /haiku/i.test(JSON.parse(body.toString('utf8')).model || ''); } catch (_) {}
     const headers = buildUpstreamHeaders(req, body.length, auth.accessToken, requestModelIsHaiku);
@@ -1667,7 +1669,7 @@ function sendUpstreamOnce(config, req, res, body, auth, reqNum, abortSignal, act
     let finished = false;
     const requestOptions = {
       protocol: upstreamUrl.protocol,
-      path: req.url,
+      path: isChat ? '/v1/messages' : req.url,
       method: req.method,
       headers,
       timeout: config.upstreamTimeoutMs
@@ -1742,6 +1744,10 @@ function sendUpstreamOnce(config, req, res, body, auth, reqNum, abortSignal, act
             console.error(`[${ts}] #${reqNum} DETECTION! Body: ${body.length}b`);
           }
           errBody = reverseMap(errBody, config, activeRenames);
+          if (isChat) {
+            let parsed; try { parsed = JSON.parse(errBody); } catch (_) { parsed = { message: errBody }; }
+            errBody = JSON.stringify(openAiError(status, parsed));
+          }
           const nh = { ...upRes.headers };
           delete nh['transfer-encoding'];
           nh['content-length'] = Buffer.byteLength(errBody);
@@ -1763,12 +1769,22 @@ function sendUpstreamOnce(config, req, res, body, auth, reqNum, abortSignal, act
         const TAIL_SIZE = 64;
         const decoder = new StringDecoder('utf8');
         const observer = createSseUsageObserver();
+        const chatTranslator = isChat ? createSseTranslator() : null;
         let pending = '';
         let buffered = '';
-        if (!config.bufferSseResponses) res.writeHead(status, sseHeaders);
+        if (chatTranslator) {
+          sseHeaders['content-type'] = 'text/event-stream; charset=utf-8';
+          sseHeaders['cache-control'] = 'no-cache';
+          res.writeHead(status, sseHeaders);
+        } else if (!config.bufferSseResponses) res.writeHead(status, sseHeaders);
         upRes.on('data', (chunk) => {
           const decoded = decoder.write(chunk);
           observer.push(decoded);
+          if (chatTranslator) {
+            const translated = chatTranslator.push(decoded);
+            if (translated) res.write(translated);
+            return;
+          }
           pending += decoded;
           if (pending.length > TAIL_SIZE) {
             let sliceIdx = pending.length - TAIL_SIZE;
@@ -1783,7 +1799,11 @@ function sendUpstreamOnce(config, req, res, body, auth, reqNum, abortSignal, act
         upRes.on('end', () => {
           pending += decoder.end();
           const observed = observer.result();
-          if (config.bufferSseResponses) {
+          if (chatTranslator) {
+            const translated = chatTranslator.end();
+            if (translated) res.write(translated);
+            res.end();
+          } else if (config.bufferSseResponses) {
             buffered += pending;
             if (observed.errorCode) {
               const message = observed.errorMessage || `Upstream SSE terminated with ${observed.errorCode}`;
@@ -1831,6 +1851,7 @@ function sendUpstreamOnce(config, req, res, body, auth, reqNum, abortSignal, act
           try {
             const parsed = JSON.parse(respBody);
             if (typeof parsed.model === 'string' && parsed.model.length > 0) actualModel = parsed.model;
+            if (isChat) respBody = JSON.stringify(anthropicToChat(parsed));
           } catch (_) {}
           nh['x-actual-model'] = actualModel;
           nh['content-length'] = Buffer.byteLength(respBody);
@@ -1927,6 +1948,15 @@ function createRequestHandler(config, state) {
       let body = Buffer.concat(chunks);
       let bodyStr = body.toString('utf8');
       const originalSize = bodyStr.length;
+      const isChat = req.method === 'POST' && req.url.split('?')[0] === '/v1/chat/completions';
+      if (isChat) {
+        try { bodyStr = JSON.stringify(chatToAnthropic(JSON.parse(bodyStr))); }
+        catch (e) {
+          const errorBody = JSON.stringify(openAiError(400, { type: 'invalid_request_error', message: e.message }));
+          res.writeHead(400, { 'content-type': 'application/json', 'content-length': Buffer.byteLength(errorBody) });
+          res.end(errorBody); responseFinished = true; return;
+        }
+      }
       // Composability: determine which renames the CALLER actually originated,
       // from the untouched request body, BEFORE we shape it. Reverse-map will
       // only undo these, so native-CC / arbitrary harnesses get their own tool
@@ -2023,7 +2053,11 @@ function createRequestHandler(config, state) {
           // above already reported this exact lease, this is a no-op instead of
           // a duplicate report the broker rejects with 404 unknown_lease.
           if (result.outcome) await reportBrokerOutcome(config, auth.lease, { ...result.outcome, latencyMs });
-          const errBody = reverseMap(result.body, config, activeRenames);
+          let errBody = reverseMap(result.body, config, activeRenames);
+          if (isChat) {
+            let parsed; try { parsed = JSON.parse(errBody); } catch (_) { parsed = { message: errBody }; }
+            errBody = JSON.stringify(openAiError(result.status, parsed));
+          }
           const nh = { ...result.headers };
           delete nh['transfer-encoding'];
           nh['content-length'] = Buffer.byteLength(errBody);

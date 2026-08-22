@@ -171,7 +171,7 @@ function invokeProxy(config, body, headers = {}, opts = {}) {
     const req = Readable.from([Buffer.from(JSON.stringify(body))]);
     Object.assign(req, {
       method: 'POST',
-      url: '/v1/messages',
+      url: opts.url || '/v1/messages',
       headers: {
         'content-type': 'application/json',
         'anthropic-version': '2023-06-01',
@@ -309,6 +309,25 @@ test('broker mode preserves complex Anthropic JSON fields and required headers',
   await waitFor(() => broker.state.reports.length >= 1);
   assert.equal(broker.state.reports[0].ok, true);
   assert.equal(broker.state.reports[0].tokens, 18);
+});
+
+test('Cursor chat completions route uses a pooled Claude seat', async (t) => {
+  const broker = makeBroker([{ leaseId: 'lease-cursor', accountId: 'acct-cursor', accessToken: 'cursor-token' }]);
+  let sent;
+  installHttpMock(t, broker.handler.bind(broker), (options, body, callback) => {
+    sent = { options, body: JSON.parse(body.toString('utf8')) };
+    emitResponse(callback, jsonResponse(200, { id: 'msg_cursor', type: 'message', model: 'claude-sonnet-4-6', content: [{ type: 'tool_use', id: 'toolu_1', name: 'read_file', input: { path: 'README.md' } }], stop_reason: 'tool_use', usage: { input_tokens: 9, output_tokens: 4 } }));
+  });
+  const out = await invokeProxy(makeConfig(), { model: 'claude-sonnet-4-6', messages: [{ role: 'user', content: 'Read it.' }], tools: [{ type: 'function', function: { name: 'read_file', parameters: { type: 'object', properties: { path: { type: 'string' } } } } }] }, {}, { url: '/v1/chat/completions' });
+  assert.equal(sent.options.path, '/v1/messages');
+  assert.equal(sent.options.headers.authorization, 'Bearer cursor-token');
+  assert.equal(sent.body.tools[0].name, 'read_file');
+  assert.match(sent.body.system[0].text, /cc_version=2\.1\.224/);
+  const response = JSON.parse(out.text);
+  assert.equal(response.object, 'chat.completion');
+  assert.equal(response.choices[0].message.tool_calls[0].function.name, 'read_file');
+  await waitFor(() => broker.state.reports.length >= 1);
+  assert.equal(broker.state.reports[0].tokens, 13);
 });
 
 test('streaming SSE event order is preserved and usage is reported without full buffering', async (t) => {
