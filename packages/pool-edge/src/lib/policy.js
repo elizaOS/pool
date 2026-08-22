@@ -25,6 +25,11 @@ import { EDGE_CONFIG } from '../edge.gen.js';
 export const ROUTES = Object.freeze({
   // inference legs, forwarded upstream with the contributor's mapped pool key
   'POST /v1/messages': { kind: 'proxy', upstream: '/v1/messages', meter: true },
+  'POST /v1/chat/completions': {
+    kind: 'proxy',
+    upstream: '/v1/chat/completions',
+    meter: true,
+  },
   'POST /v1/messages/count_tokens': {
     kind: 'proxy',
     upstream: '/v1/messages/count_tokens',

@@ -2,6 +2,19 @@
 
 const crypto = require('crypto');
 
+const CURSOR_MODEL_ALIASES = Object.freeze({
+  'anthropic:sonnet': 'claude-sonnet-4-6',
+  'anthropic:opus': 'claude-opus-4-6',
+  'anthropic:haiku': 'claude-haiku-4-5-20251001'
+});
+
+function cursorModel(model) {
+  const requested = String(model || 'anthropic:sonnet');
+  if (CURSOR_MODEL_ALIASES[requested]) return CURSOR_MODEL_ALIASES[requested];
+  if (requested.startsWith('anthropic:claude-')) return requested.slice('anthropic:'.length);
+  return requested;
+}
+
 function contentBlocks(content) {
   if (content == null) return [];
   if (typeof content === 'string') return content ? [{ type: 'text', text: content }] : [];
@@ -55,7 +68,7 @@ function chatToAnthropic(body) {
     }
   }
   const out = {
-    model: String(body.model || 'claude-sonnet-4-6'),
+    model: cursorModel(body.model),
     max_tokens: body.max_completion_tokens ?? body.max_tokens ?? 8192,
     messages,
     stream: body.stream === true
@@ -155,4 +168,4 @@ function createSseTranslator() {
   };
 }
 
-module.exports = { anthropicToChat, chatToAnthropic, createSseTranslator, openAiError };
+module.exports = { anthropicToChat, chatToAnthropic, createSseTranslator, cursorModel, openAiError };

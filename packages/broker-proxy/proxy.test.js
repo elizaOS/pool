@@ -318,9 +318,10 @@ test('Cursor chat completions route uses a pooled Claude seat', async (t) => {
     sent = { options, body: JSON.parse(body.toString('utf8')) };
     emitResponse(callback, jsonResponse(200, { id: 'msg_cursor', type: 'message', model: 'claude-sonnet-4-6', content: [{ type: 'tool_use', id: 'toolu_1', name: 'read_file', input: { path: 'README.md' } }], stop_reason: 'tool_use', usage: { input_tokens: 9, output_tokens: 4 } }));
   });
-  const out = await invokeProxy(makeConfig(), { model: 'claude-sonnet-4-6', messages: [{ role: 'user', content: 'Read it.' }], tools: [{ type: 'function', function: { name: 'read_file', parameters: { type: 'object', properties: { path: { type: 'string' } } } } }] }, {}, { url: '/v1/chat/completions' });
+  const out = await invokeProxy(makeConfig(), { model: 'anthropic:sonnet', messages: [{ role: 'user', content: 'Read it.' }], tools: [{ type: 'function', function: { name: 'read_file', parameters: { type: 'object', properties: { path: { type: 'string' } } } } }] }, {}, { url: '/v1/chat/completions' });
   assert.equal(sent.options.path, '/v1/messages');
   assert.equal(sent.options.headers.authorization, 'Bearer cursor-token');
+  assert.equal(sent.body.model, 'claude-sonnet-4-6');
   assert.equal(sent.body.tools[0].name, 'read_file');
   assert.match(sent.body.system[0].text, /cc_version=2\.1\.224/);
   const response = JSON.parse(out.text);

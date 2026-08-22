@@ -1,7 +1,15 @@
 'use strict';
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { anthropicToChat, chatToAnthropic, createSseTranslator } = require('./openai-chat-compat');
+const { anthropicToChat, chatToAnthropic, createSseTranslator, cursorModel } = require('./openai-chat-compat');
+
+test('maps Cursor-safe Anthropic aliases to upstream Claude models', () => {
+  assert.equal(cursorModel('anthropic:sonnet'), 'claude-sonnet-4-6');
+  assert.equal(cursorModel('anthropic:opus'), 'claude-opus-4-6');
+  assert.equal(cursorModel('anthropic:haiku'), 'claude-haiku-4-5-20251001');
+  assert.equal(cursorModel('anthropic:claude-sonnet-4-6'), 'claude-sonnet-4-6');
+  assert.equal(cursorModel('custom-model'), 'custom-model');
+});
 
 test('converts Cursor messages and tools to Anthropic', () => {
   const out = chatToAnthropic({ model: 'claude-sonnet-4-6', stream: true, messages: [

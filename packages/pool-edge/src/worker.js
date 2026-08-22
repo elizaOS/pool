@@ -170,11 +170,11 @@ async function handleProxy(request, env, ctx, route, url) {
   // Model gate for restricted tiers. Only restricted tiers pay the buffering
   // cost; everyone else keeps a pure streaming pass-through.
   let body = request.body;
-  if (tier.models && route.upstream === '/v1/messages') {
+  if (tier.models && (route.upstream === '/v1/messages' || route.upstream === '/v1/chat/completions')) {
     const text = await request.text();
     let model = null;
     try {
-      model = JSON.parse(text).model || null;
+      model = normalizeCursorModel(JSON.parse(text).model || null);
     } catch {
       // error-policy: an unparseable body is upstream's to reject, not ours to guess.
     }
@@ -230,6 +230,16 @@ async function handleProxy(request, env, ctx, route, url) {
   return new Response(toClient, { status: response.status, headers });
 }
 
+function normalizeCursorModel(model) {
+  if (model === 'anthropic:sonnet') return 'claude-sonnet-4-6';
+  if (model === 'anthropic:opus') return 'claude-opus-4-6';
+  if (model === 'anthropic:haiku') return 'claude-haiku-4-5-20251001';
+  if (typeof model === 'string' && model.startsWith('anthropic:claude-')) {
+    return model.slice('anthropic:'.length);
+  }
+  return model;
+}
+
 /**
  * Read usage off the response copy and add it to the edge counter.
  * SSE and non-SSE both carry `usage`; we parse whichever shape arrives.
@@ -268,7 +278,7 @@ export function extractWeightedUsage(text, contentType) {
       if (!payload || payload === '[DONE]') continue;
       try {
         const event = JSON.parse(payload);
-        if (event.usage) total += weighUsage(event.usage);
+        if (event.usage) total += weighCompatibleUsage(event.usage);
         if (event.message && event.message.usage) total += weighUsage(event.message.usage);
       } catch {
         // error-policy: a malformed SSE frame is skipped, not treated as zero-cost overall.
@@ -278,10 +288,21 @@ export function extractWeightedUsage(text, contentType) {
   }
   try {
     const parsed = JSON.parse(text);
-    return weighUsage(parsed.usage);
+    return weighCompatibleUsage(parsed.usage);
   } catch {
     return 0;
   }
+}
+
+function weighCompatibleUsage(usage) {
+  if (!usage || typeof usage !== 'object') return 0;
+  if (usage.prompt_tokens == null && usage.completion_tokens == null) return weighUsage(usage);
+  const cached = Number(usage.prompt_tokens_details && usage.prompt_tokens_details.cached_tokens || 0);
+  return weighUsage({
+    input_tokens: Math.max(0, Number(usage.prompt_tokens || 0) - cached),
+    output_tokens: Number(usage.completion_tokens || 0),
+    cache_read_input_tokens: cached,
+  });
 }
 
 export { grantKey };

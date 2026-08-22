@@ -90,6 +90,15 @@ t('SSE without cached details leaves input as reported', () => {
   assert.strictEqual(usage.cache_read_input_tokens, 0);
 });
 
+t('SSE chat-completions usage shape is parsed', () => {
+  const usage = { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0 };
+  const feed = makeResponsesUsageParser(usage, {});
+  feed(Buffer.from('data: {"model":"claude-sonnet-4-6","choices":[],"usage":{"prompt_tokens":1200,"completion_tokens":44,"prompt_tokens_details":{"cached_tokens":1024}}}\n'));
+  assert.strictEqual(usage.input_tokens, 176);
+  assert.strictEqual(usage.cache_read_input_tokens, 1024);
+  assert.strictEqual(usage.output_tokens, 44);
+});
+
 t('SSE events without usage do not clobber parsed usage', () => {
   const usage = { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0 };
   const feed = makeResponsesUsageParser(usage, {});

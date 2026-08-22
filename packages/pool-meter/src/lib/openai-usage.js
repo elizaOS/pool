@@ -50,7 +50,8 @@ function makeResponsesUsageParser(usage, reqMeta) {
         if (m) reqMeta.model = m;
       }
       const u = (resp && resp.usage) || obj.usage || null;
-      if (u && (u.input_tokens != null || u.output_tokens != null)) {
+      if (u && (u.input_tokens != null || u.output_tokens != null ||
+                u.prompt_tokens != null || u.completion_tokens != null)) {
         applyOpenAiUsage(usage, u);
       }
     }

@@ -233,6 +233,13 @@ test('streaming usage is extracted from SSE frames', () => {
   );
 });
 
+test('Chat Completions usage is converted before edge weighting', () => {
+  const usage = { prompt_tokens: 100, completion_tokens: 10, prompt_tokens_details: { cached_tokens: 80 } };
+  const expected = 20 * 1 + 80 * 0.1 + 10 * 5;
+  assert.equal(extractWeightedUsage(JSON.stringify({ usage }), 'application/json'), expected);
+  assert.equal(extractWeightedUsage(`data: ${JSON.stringify({ usage })}\n\ndata: [DONE]\n\n`, 'text/event-stream'), expected);
+});
+
 test('malformed accounting payloads weigh zero rather than throwing', () => {
   assert.equal(extractWeightedUsage('not json', 'application/json'), 0);
   assert.equal(extractWeightedUsage('data: {bad\n\n', 'text/event-stream'), 0);

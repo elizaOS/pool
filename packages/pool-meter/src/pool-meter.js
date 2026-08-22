@@ -2821,6 +2821,7 @@ function proxyRequest(req, res, info, prebuffered) {
   // capture request body for model/stream detection while forwarding
   const reqMeta = { model: null, stream: false };
   const isMessages = req.url.startsWith('/v1/messages');
+  const isChatCompletions = req.url.startsWith('/v1/chat/completions');
   // Pooled trace capture (Feature 2): pooled usage defaults to traced, honoring
   // the per-key opt-out. When tracing, capture the FULL request body (bounded
   // by the trace clip) instead of just the 512K head we need for model/stream.
@@ -2828,7 +2829,7 @@ function proxyRequest(req, res, info, prebuffered) {
   let reqBodyChunks = [];
   let reqBodyLen = 0;
   const REQ_CAP = wantTrace ? (2 * 1024 * 1024) : (512 * 1024);
-  const captureReq = isMessages || wantTrace;
+  const captureReq = isMessages || isChatCompletions || wantTrace;
 
   const upReq = http.request({
     host: UPSTREAM_HOST,
@@ -2910,7 +2911,7 @@ function proxyRequest(req, res, info, prebuffered) {
     };
 
     if (isSse) {
-      const feed = makeSseUsageParser(usage);
+      const feed = isChatCompletions ? makeResponsesUsageParser(usage, reqMeta) : makeSseUsageParser(usage);
       upRes.on('data', (chunk) => { if (ttfb == null) ttfb = Date.now() - start; feed(chunk); if (textCollector) { try { textCollector.feed(chunk); } catch (_) {} } res.write(chunk); }); // tee: parse copy, pass original bytes
       upRes.on('end', () => { res.end(); finish(); });
     } else {
@@ -2930,10 +2931,13 @@ function proxyRequest(req, res, info, prebuffered) {
           if (wantTrace) nonSseRespText = raw;
           const body = JSON.parse(raw);
           if (body && body.usage) {
-            usage.input_tokens = body.usage.input_tokens || 0;
-            usage.output_tokens = body.usage.output_tokens || 0;
-            usage.cache_creation_input_tokens = body.usage.cache_creation_input_tokens || 0;
-            usage.cache_read_input_tokens = body.usage.cache_read_input_tokens || 0;
+            if (isChatCompletions) applyOpenAiUsage(usage, body.usage);
+            else {
+              usage.input_tokens = body.usage.input_tokens || 0;
+              usage.output_tokens = body.usage.output_tokens || 0;
+              usage.cache_creation_input_tokens = body.usage.cache_creation_input_tokens || 0;
+              usage.cache_read_input_tokens = body.usage.cache_read_input_tokens || 0;
+            }
           }
           if (!reqMeta.model && body && body.model) reqMeta.model = body.model;
         } catch (_) { /* non-JSON or huge body: log zeros */ }
@@ -2957,7 +2961,7 @@ function proxyRequest(req, res, info, prebuffered) {
   // The body was already consumed by the tier model gate: replay it verbatim
   // instead of piping a stream that has no data left to emit.
   if (prebuffered) {
-    if (isMessages) {
+    if (isMessages || isChatCompletions) {
       try {
         const b = JSON.parse(prebuffered.toString('utf8'));
         reqMeta.model = b.model || null;
