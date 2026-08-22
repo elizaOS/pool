@@ -285,6 +285,10 @@ test('broker mode preserves complex Anthropic JSON fields and required headers',
     assert.equal(options.headers['anthropic-version'], '2023-06-01');
     assert.match(options.headers['anthropic-beta'], /input-beta/);
     assert.match(options.headers['anthropic-beta'], /oauth-2025-04-20/);
+    assert.equal(options.headers['user-agent'], 'claude-cli/2.1.224 (external, sdk-cli)');
+    assert.equal(options.headers['x-app'], 'cli');
+    assert.match(options.headers['x-client-request-id'], /^[0-9a-f-]{36}$/);
+    assert.match(options.headers['x-claude-code-session-id'], /^[0-9a-f-]{36}$/);
     emitResponse(callback, jsonResponse(200, {
       type: 'message',
       model: 'claude-sonnet-4-20250514',
@@ -298,6 +302,8 @@ test('broker mode preserves complex Anthropic JSON fields and required headers',
   const sent = JSON.parse(upstreamState.requests[0].body.toString('utf8'));
   assert.deepEqual(sent.messages, messageBody().messages);
   assert.deepEqual(sent.tools, messageBody().tools);
+  assert.match(sent.system[0].text, /^x-anthropic-billing-header: cc_version=2\.1\.224\.[0-9a-f]{3}; cc_entrypoint=sdk-cli; cch=[0-9a-f]{5};$/);
+  assert.equal(sent.system[1].text, "You are a Claude agent, built on Anthropic's Claude Agent SDK.");
   assert.equal(sent.system.some(block => block.text === 'system survives'), true);
   assert.equal(broker.state.leaseRequests[0].sessionKey, 'openclaw:test-session');
   await waitFor(() => broker.state.reports.length >= 1);
